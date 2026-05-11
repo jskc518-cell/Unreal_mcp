@@ -1575,6 +1575,59 @@ export const consolidatedToolDefinitions: ToolDefinition[] = [
       }
     }
   },
+  // PCG (Procedural Content Generation) graph editing
+  {
+    name: 'manage_pcg_graph',
+    category: 'world',
+    description: 'Edit PCG graphs programmatically: add/remove nodes, connect pins, set node properties, manage user parameters, force regeneration. Backed by UPCGGraph C++ API in the McpAutomationBridge plugin.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: [
+            'list_node_types',
+            'get_graph_details',
+            'get_nodes',
+            'get_node_details',
+            'get_pin_details',
+            'create_node',
+            'delete_node',
+            'set_node_property',
+            'set_node_position',
+            'rename_node',
+            'connect_pins',
+            'disconnect_pins',
+            'break_pin_links',
+            'add_user_parameter',
+            'remove_user_parameter',
+            'create_pcg_graph',
+            'force_regenerate'
+          ],
+          description: 'PCG graph action to perform.'
+        },
+        assetPath: { type: 'string', description: 'PCG graph asset path (e.g. /Game/PCG/Blocks/PCG_ResidentialBlock). Required for all actions except list_node_types, create_pcg_graph, and force_regenerate.' },
+        path: { type: 'string', description: 'Folder path for create_pcg_graph (e.g. /Game/PCG/Blocks).' },
+        name: { type: 'string', description: 'Asset name for create_pcg_graph; or new node title for rename_node.' },
+        nodeType: { type: 'string', description: 'UPCGSettings subclass or alias (SplineSampler, StaticMeshSpawner, Difference, Transform, Filter, SelfPruning, Subgraph, CreatePoints, CopyPoints, CreateSpline, GetActorData, AttributeRemap, AttributeCast, or full class name).' },
+        nodeId: { type: 'string', description: 'Node identifier (object name, authored title, settings class name, or "Input"/"Output").' },
+        x: { type: 'number', description: 'Node X position (graph editor units).' },
+        y: { type: 'number', description: 'Node Y position (graph editor units).' },
+        properties: { type: 'object', additionalProperties: true, description: 'Optional property dictionary applied to UPCGSettings sub-object on create_node.' },
+        propertyName: { type: 'string', description: 'Property name for set_node_property (resolved on UPCGSettings sub-object).' },
+        value: { description: 'Property value for set_node_property.' },
+        fromNode: { type: 'string', description: 'Source node identifier for connect_pins / disconnect_pins.' },
+        fromPin: { type: 'string', description: 'Source pin label (case-insensitive). Omit on single-output nodes.' },
+        toNode: { type: 'string', description: 'Target node identifier for connect_pins / disconnect_pins.' },
+        toPin: { type: 'string', description: 'Target pin label (case-insensitive). Omit on single-input nodes.' },
+        pinName: { type: 'string', description: 'Pin name for break_pin_links / get_pin_details.' },
+        parameterName: { type: 'string', description: 'User parameter name.' },
+        parameterType: { type: 'string', enum: ['bool', 'int', 'int64', 'float', 'double', 'name', 'string', 'text'], description: 'User parameter primitive type.' },
+        actorName: { type: 'string', description: 'Actor name with UPCGComponent for force_regenerate.' }
+      },
+      required: ['action']
+    }
+  },
             // Authoring status actions
   {
     name: 'manage_effect',

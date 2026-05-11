@@ -250,6 +250,11 @@ function registerDefaultHandlers() {
 
   toolRegistry.register('manage_geometry', async (args, tools) => await handleGeometryTools(getToolAction(args), args, tools));
 
+  // PCG (Procedural Content Generation) graph editing - dispatches all sub-actions through graph-handlers.
+  toolRegistry.register('manage_pcg_graph', async (args, tools) => {
+    return await handleGraphTools('manage_pcg_graph', getToolAction(args), args, tools);
+  });
+
   toolRegistry.register('manage_gas', async (args, tools) => await handleGASTools(getToolAction(args), args, tools));
   toolRegistry.register('manage_character', async (args, tools) => await handleCharacterTools(getToolAction(args), args, tools));
   toolRegistry.register('manage_combat', async (args, tools) => await handleCombatTools(getToolAction(args), args, tools));

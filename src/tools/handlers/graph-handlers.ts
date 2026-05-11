@@ -88,6 +88,8 @@ export async function handleGraphTools(toolName: string, action: string, args: G
             return handleMaterialGraph(action, args, tools);
         case 'manage_behavior_tree':
             return handleBehaviorTree(action, args, tools);
+        case 'manage_pcg_graph':
+            return handlePCGGraph(action, args, tools);
         default:
             throw new Error(`Unknown graph tool: ${toolName}`);
     }
@@ -233,6 +235,27 @@ async function handleMaterialGraph(action: string, args: GraphArgs, tools: ITool
     }
 
     const res = await executeAutomationRequest(tools, 'manage_material_graph', payload as HandlerArgs, 'Automation bridge not available') as AutomationResponse;
+    return cleanObject(promoteScalarResultFields(res)) as Record<string, unknown>;
+}
+
+async function handlePCGGraph(action: string, args: GraphArgs, tools: ITools): Promise<Record<string, unknown>> {
+    const payload: ProcessedGraphArgs = { ...args, subAction: action };
+
+    // Allow Node.Pin format for connect/disconnect (matches blueprint/niagara handler convention).
+    if (action === 'connect_pins' || action === 'disconnect_pins') {
+        if (typeof payload.fromNode === 'string' && payload.fromNode.includes('.') && !payload.fromPin) {
+            const parts = payload.fromNode.split('.');
+            payload.fromNode = parts[0];
+            payload.fromPin = parts.slice(1).join('.');
+        }
+        if (typeof payload.toNode === 'string' && payload.toNode.includes('.') && !payload.toPin) {
+            const parts = payload.toNode.split('.');
+            payload.toNode = parts[0];
+            payload.toPin = parts.slice(1).join('.');
+        }
+    }
+
+    const res = await executeAutomationRequest(tools, 'manage_pcg_graph', payload as HandlerArgs, 'Automation bridge not available') as AutomationResponse;
     return cleanObject(promoteScalarResultFields(res)) as Record<string, unknown>;
 }
 

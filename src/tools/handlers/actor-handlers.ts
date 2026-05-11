@@ -430,16 +430,22 @@ const handlers: Record<string, ActorActionHandler> = {
         const params = normalizeArgs(args, [
             { key: 'actorName', aliases: ['name', 'actor_name'], required: true },
             { key: 'functionName', aliases: ['function_name'], required: true },
+            { key: 'componentName', aliases: ['component_name', 'component'] },
             { key: 'arguments', aliases: ['args'] }
         ]);
         const actorName = extractString(params, 'actorName');
         const functionName = extractString(params, 'functionName');
-        return await executeAutomationRequest(tools, TOOL_ACTIONS.CONTROL_ACTOR, {
+        const componentName = extractOptionalString(params, 'componentName');
+        const payload: Record<string, unknown> = {
             action: 'call_function',
             actorName,
             functionName,
             arguments: params.arguments
-        }) as Record<string, unknown>;
+        };
+        if (componentName) {
+            payload.componentName = componentName;
+        }
+        return await executeAutomationRequest(tools, TOOL_ACTIONS.CONTROL_ACTOR, payload) as Record<string, unknown>;
     },
     find_by_class: async (args, tools) => {
         const params = normalizeArgs(args, [
