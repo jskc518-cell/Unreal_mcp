@@ -110,8 +110,8 @@ public:
 			.String(TEXT("snapshotName"), TEXT(""))
 			.Integer(TEXT("limit"), TEXT("Maximum number of actors to return."))
 			.Bool(TEXT("collisionEnabled"), TEXT("Whether actor collision is enabled."))
-			.String(TEXT("functionName"), TEXT("Name of the function."))
-			.Array(TEXT("arguments"), TEXT("Arguments to pass to an actor function."))
+			.String(TEXT("functionName"), TEXT("Name of the function (looked up on componentName if provided, otherwise on the actor)."))
+			.Array(TEXT("arguments"), TEXT("Arguments for call_actor_function. Array (positional) is the canonical form; the handler also accepts an object keyed by parameter name."))
 			.Required({TEXT("action")})
 			.Build();
 	}

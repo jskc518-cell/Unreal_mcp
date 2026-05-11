@@ -243,6 +243,12 @@ public class McpAutomationBridge : ModuleRules
             // BehaviorTreeEditor (optional plugin) - for Behavior Tree graph editing
             AddOptionalDynamicModule(Target, EngineDir, "BehaviorTreeEditor", "BehaviorTreeEditor");
 
+            // PCG (Procedural Content Generation) - runtime graph + editor graph
+            // Required for manage_pcg_graph action (UPCGGraph, UPCGNode, UPCGPin, UPCGSettings, UPCGComponent).
+            bool bHasPCG = AddOptionalDynamicModule(Target, EngineDir, "PCG", "PCG");
+            AddOptionalDynamicModule(Target, EngineDir, "PCGEditor", "PCGEditor");
+            PublicDefinitions.Add(bHasPCG ? "MCP_HAS_PCG_PLUGIN=1" : "MCP_HAS_PCG_PLUGIN=0");
+
             // DataValidation (optional plugin) - for data validation
             AddOptionalDynamicModule(Target, EngineDir, "DataValidation", "DataValidation");
 
@@ -322,6 +328,7 @@ public class McpAutomationBridge : ModuleRules
             PublicDefinitions.Add("MCP_HAS_EDGRAPH_SCHEMA_K2=0");
             PublicDefinitions.Add("MCP_HAS_SUBOBJECT_DATA_SUBSYSTEM=0");
             PublicDefinitions.Add("MCP_HAS_WP_FOR_EACH_DATALAYER=0");
+            PublicDefinitions.Add("MCP_HAS_PCG_PLUGIN=0");
         }
 
         // ============================================================================

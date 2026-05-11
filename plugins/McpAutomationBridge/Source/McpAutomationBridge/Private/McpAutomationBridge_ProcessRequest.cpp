@@ -407,6 +407,11 @@ void UMcpAutomationBridgeSubsystem::ProcessAutomationRequest(
                                             RequestingSocket);
           }))
         return;
+      if (HandleAndLog(TEXT("HandlePCGGraphAction"), [&]() {
+            return HandlePCGGraphAction(RequestId, Action, Payload,
+                                        RequestingSocket);
+          }))
+        return;
       if (HandleAndLog(TEXT("HandleWorldPartitionAction"), [&]() {
             return HandleWorldPartitionAction(RequestId, Action, Payload,
                                               RequestingSocket);

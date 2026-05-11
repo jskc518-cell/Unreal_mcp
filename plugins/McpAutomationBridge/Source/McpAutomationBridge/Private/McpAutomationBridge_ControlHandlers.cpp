@@ -122,6 +122,22 @@
 #endif
 
 // -----------------------------------------------------------------------------
+// Editor-only Includes: ScopedTransaction (header path varies by UE version)
+// -----------------------------------------------------------------------------
+#if __has_include("ScopedTransaction.h")
+#include "ScopedTransaction.h"
+#define MCP_HAS_SCOPED_TRANSACTION 1
+#elif __has_include("Editor/ScopedTransaction.h")
+#include "Editor/ScopedTransaction.h"
+#define MCP_HAS_SCOPED_TRANSACTION 1
+#elif __has_include("Misc/ScopedTransaction.h")
+#include "Misc/ScopedTransaction.h"
+#define MCP_HAS_SCOPED_TRANSACTION 1
+#else
+#define MCP_HAS_SCOPED_TRANSACTION 0
+#endif
+
+// -----------------------------------------------------------------------------
 // Editor-only Includes: Components & Actors
 // -----------------------------------------------------------------------------
 #include "Components/PrimitiveComponent.h"
@@ -2443,50 +2459,169 @@ bool UMcpAutomationBridgeSubsystem::HandleControlActorCallFunction(
     const FString &RequestId, const TSharedPtr<FJsonObject> &Payload,
     TSharedPtr<FMcpBridgeWebSocket> Socket) {
 #if WITH_EDITOR
-  FString ActorName, FunctionName;
+  FString ActorName, FunctionName, ComponentName;
   Payload->TryGetStringField(TEXT("actorName"), ActorName);
   Payload->TryGetStringField(TEXT("functionName"), FunctionName);
-  
+  Payload->TryGetStringField(TEXT("componentName"), ComponentName);
+
   if (ActorName.IsEmpty() || FunctionName.IsEmpty()) {
-    SendAutomationError(Socket, RequestId, TEXT("actorName and functionName are required"), TEXT("MISSING_PARAM"));
+    SendAutomationError(Socket, RequestId,
+                        TEXT("actorName and functionName are required"),
+                        TEXT("MISSING_PARAM"));
     return true;
   }
-  
-  AActor* Actor = FindActorByName(ActorName);
+
+  AActor *Actor = FindActorByName(ActorName);
   if (!Actor) {
-    SendAutomationError(Socket, RequestId, FString::Printf(TEXT("Actor not found: %s"), *ActorName), TEXT("ACTOR_NOT_FOUND"));
+    SendAutomationError(Socket, RequestId,
+                        FString::Printf(TEXT("Actor not found: %s"), *ActorName),
+                        TEXT("ACTOR_NOT_FOUND"));
     return true;
   }
-  
-  // Find and call the function
-  UFunction* Function = Actor->FindFunction(*FunctionName);
-  if (Function) {
-    // Check if function has parameters - passing nullptr to a function expecting
-    // parameters can cause crashes or undefined behavior
-    if (Function->ParmsSize > 0) {
-      // Function has parameters - we need to provide a buffer
-      // Allocate zeroed memory for parameters
-      void* ParmsBuffer = FMemory::Malloc(Function->ParmsSize, 16);
-      FMemory::Memzero(ParmsBuffer, Function->ParmsSize);
-      
-      // Call with parameter buffer
-      Actor->ProcessEvent(Function, ParmsBuffer);
-      
-      // Free the buffer
-      FMemory::Free(ParmsBuffer);
-    } else {
-      // No parameters, safe to pass nullptr
-      Actor->ProcessEvent(Function, nullptr);
+
+  UObject *Target = Actor;
+  if (!ComponentName.IsEmpty()) {
+    UActorComponent *Component = FindComponentByName(Actor, ComponentName);
+    if (!Component) {
+      SendAutomationError(Socket, RequestId,
+          FString::Printf(TEXT("Component not found: %s"), *ComponentName),
+          TEXT("COMPONENT_NOT_FOUND"));
+      return true;
     }
-    
-    TSharedPtr<FJsonObject> Data = McpHandlerUtils::CreateResultObject();
-    Data->SetStringField(TEXT("actorName"), ActorName);
-    Data->SetStringField(TEXT("functionName"), FunctionName);
-    SendStandardSuccessResponse(this, Socket, RequestId, TEXT("Function called"), Data);
+    Target = Component;
+  }
+
+  UFunction *Function = Target->FindFunction(*FunctionName);
+  if (!Function) {
+    SendAutomationError(Socket, RequestId,
+        FString::Printf(TEXT("Function not found: %s on %s"),
+                        *FunctionName, *Target->GetClass()->GetName()),
+        TEXT("FUNCTION_NOT_FOUND"));
     return true;
   }
-  
-  SendAutomationError(Socket, RequestId, FString::Printf(TEXT("Function not found: %s"), *FunctionName), TEXT("FUNCTION_NOT_FOUND"));
+
+  // Accept arguments as either Array (positional) or Object (by parameter name).
+  TArray<TSharedPtr<FJsonValue>> ArgsArray;
+  TSharedPtr<FJsonObject> ArgsObject;
+  bool bArgsArePositional = false;
+  bool bArgsAreNamed = false;
+  {
+    const TSharedPtr<FJsonValue> ArgsField = Payload->TryGetField(TEXT("arguments"));
+    if (ArgsField.IsValid()) {
+      if (ArgsField->Type == EJson::Array) {
+        ArgsArray = ArgsField->AsArray();
+        bArgsArePositional = true;
+      } else if (ArgsField->Type == EJson::Object) {
+        ArgsObject = ArgsField->AsObject();
+        bArgsAreNamed = true;
+      }
+    }
+  }
+
+  // Allocate parameter buffer. InitializeValue_InContainer is required so that
+  // non-trivial members (FString, TArray, TSharedPtr, etc.) get proper default
+  // construction before ApplyJsonValueToProperty assigns into them.
+  uint8 *ParmsBuffer = static_cast<uint8 *>(
+      FMemory::Malloc(FMath::Max<int32>(Function->ParmsSize, 1), 16));
+  FMemory::Memzero(ParmsBuffer, Function->ParmsSize);
+  for (TFieldIterator<FProperty> It(Function);
+       It && It->HasAnyPropertyFlags(CPF_Parm); ++It) {
+    It->InitializeValue_InContainer(ParmsBuffer);
+  }
+
+  TArray<FString> ArgErrors;
+  int32 PositionalIndex = 0;
+  for (TFieldIterator<FProperty> It(Function);
+       It && It->HasAnyPropertyFlags(CPF_Parm); ++It) {
+    FProperty *Prop = *It;
+    const bool bIsReturn = Prop->HasAnyPropertyFlags(CPF_ReturnParm);
+    const bool bIsOut = Prop->HasAnyPropertyFlags(CPF_OutParm);
+    const bool bIsRef = Prop->HasAnyPropertyFlags(CPF_ReferenceParm);
+    if (bIsReturn) continue;
+    // Pure out-params (out-only, not ref) take no input value.
+    if (bIsOut && !bIsRef) {
+      ++PositionalIndex;
+      continue;
+    }
+
+    TSharedPtr<FJsonValue> ArgValue;
+    if (bArgsArePositional && PositionalIndex < ArgsArray.Num()) {
+      ArgValue = ArgsArray[PositionalIndex];
+    } else if (bArgsAreNamed && ArgsObject.IsValid()) {
+      ArgValue = ArgsObject->TryGetField(Prop->GetName());
+      if (!ArgValue.IsValid()) {
+        for (const auto &Pair : ArgsObject->Values) {
+          if (Pair.Key.Equals(Prop->GetName(), ESearchCase::IgnoreCase)) {
+            ArgValue = Pair.Value;
+            break;
+          }
+        }
+      }
+    }
+    ++PositionalIndex;
+
+    if (ArgValue.IsValid()) {
+      FString ApplyError;
+      if (!ApplyJsonValueToProperty(ParmsBuffer, Prop, ArgValue, ApplyError)) {
+        ArgErrors.Add(FString::Printf(TEXT("%s: %s"), *Prop->GetName(), *ApplyError));
+      }
+    }
+  }
+
+  auto DestroyAndFreeBuffer = [&]() {
+    for (TFieldIterator<FProperty> It(Function);
+         It && It->HasAnyPropertyFlags(CPF_Parm); ++It) {
+      It->DestroyValue_InContainer(ParmsBuffer);
+    }
+    FMemory::Free(ParmsBuffer);
+  };
+
+  if (ArgErrors.Num() > 0) {
+    DestroyAndFreeBuffer();
+    SendAutomationError(Socket, RequestId,
+        FString::Printf(TEXT("Argument errors: %s"),
+                        *FString::Join(ArgErrors, TEXT("; "))),
+        TEXT("INVALID_ARGUMENT"));
+    return true;
+  }
+
+#if MCP_HAS_SCOPED_TRANSACTION
+  FScopedTransaction Transaction(FText::FromString(
+      FString::Printf(TEXT("MCP Call %s"), *FunctionName)));
+#endif
+  Target->Modify();
+  Target->ProcessEvent(Function, ParmsBuffer);
+  Actor->MarkPackageDirty();
+
+  TSharedPtr<FJsonObject> Data = McpHandlerUtils::CreateResultObject();
+  Data->SetStringField(TEXT("actorName"), ActorName);
+  if (!ComponentName.IsEmpty())
+    Data->SetStringField(TEXT("componentName"), ComponentName);
+  Data->SetStringField(TEXT("functionName"), FunctionName);
+
+  TSharedPtr<FJsonObject> OutParams = MakeShared<FJsonObject>();
+  bool bHasOutParams = false;
+  for (TFieldIterator<FProperty> It(Function);
+       It && It->HasAnyPropertyFlags(CPF_Parm); ++It) {
+    FProperty *Prop = *It;
+    if (Prop->HasAnyPropertyFlags(CPF_ReturnParm)) {
+      TSharedPtr<FJsonValue> RetVal =
+          ExportPropertyToJsonValue(ParmsBuffer, Prop);
+      if (RetVal.IsValid()) Data->SetField(TEXT("returnValue"), RetVal);
+    } else if (Prop->HasAnyPropertyFlags(CPF_OutParm)) {
+      TSharedPtr<FJsonValue> OutVal =
+          ExportPropertyToJsonValue(ParmsBuffer, Prop);
+      if (OutVal.IsValid()) {
+        OutParams->SetField(Prop->GetName(), OutVal);
+        bHasOutParams = true;
+      }
+    }
+  }
+  if (bHasOutParams) Data->SetObjectField(TEXT("outParams"), OutParams);
+
+  DestroyAndFreeBuffer();
+
+  SendStandardSuccessResponse(this, Socket, RequestId, TEXT("Function called"), Data);
   return true;
 #else
   return false;

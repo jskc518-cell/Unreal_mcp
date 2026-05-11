@@ -48,6 +48,11 @@
       "Optional": true
     },
     {
+      "Name": "PCG",
+      "Enabled": true,
+      "Optional": true
+    },
+    {
       "Name": "EnvironmentQueryEditor",
       "Enabled": true,
       "Optional": true

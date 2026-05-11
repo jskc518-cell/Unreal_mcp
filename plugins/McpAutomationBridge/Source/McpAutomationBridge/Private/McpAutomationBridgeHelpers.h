@@ -1954,6 +1954,68 @@ ApplyJsonValueToProperty(void *TargetContainer, FProperty *Property,
                    : (uint8)FCString::Atoi(*V->AsString());
         continue;
       }
+      // Struct inner: parse each JSON object element via JsonObjectToUStruct.
+      // Handles arbitrarily-nested structs (e.g. TArray<FPCGMeshSelectorByAttributeEntry>
+      // where the entry struct contains nested Descriptor/StaticMesh fields).
+      if (FStructProperty *SIP = CastField<FStructProperty>(Inner)) {
+        if (!SIP->Struct) {
+          OutError = TEXT("Struct array inner has null UStruct");
+          return false;
+        }
+        if (V->Type == EJson::Object) {
+          const TSharedPtr<FJsonObject> ElemObj = V->AsObject();
+          if (ElemObj.IsValid() && FJsonObjectConverter::JsonObjectToUStruct(
+                                       ElemObj.ToSharedRef(), SIP->Struct,
+                                       ElemPtr, 0, 0)) {
+            continue;
+          }
+        }
+        if (V->Type == EJson::String) {
+          // Allow a JSON string that itself parses as a JSON object.
+          const FString Txt = V->AsString();
+          TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(Txt);
+          TSharedPtr<FJsonObject> P;
+          if (FJsonSerializer::Deserialize(R, P) && P.IsValid() &&
+              FJsonObjectConverter::JsonObjectToUStruct(
+                  P.ToSharedRef(), SIP->Struct, ElemPtr, 0, 0)) {
+            continue;
+          }
+        }
+        OutError = TEXT("Could not parse JSON value into struct array element");
+        return false;
+      }
+      // Object pointer inner: accept asset path string, load lazily.
+      if (FObjectProperty *OIP = CastField<FObjectProperty>(Inner)) {
+        if (V->Type == EJson::Null) {
+          OIP->SetObjectPropertyValue(ElemPtr, nullptr);
+          continue;
+        }
+        if (V->Type == EJson::String) {
+          const FString Path = V->AsString();
+          UClass *ExpectedClass =
+              OIP->PropertyClass ? OIP->PropertyClass.Get() : UObject::StaticClass();
+          UObject *Loaded = StaticLoadObject(ExpectedClass, nullptr, *Path);
+          OIP->SetObjectPropertyValue(ElemPtr, Loaded);
+          continue;
+        }
+        OutError = TEXT("Object array inner: expected string asset path or null");
+        return false;
+      }
+      // Soft object pointer inner: store asset path (no load).
+      if (FSoftObjectProperty *SOIP = CastField<FSoftObjectProperty>(Inner)) {
+        if (V->Type == EJson::Null) {
+          FSoftObjectPtr &Dest = *reinterpret_cast<FSoftObjectPtr *>(ElemPtr);
+          Dest = FSoftObjectPtr();
+          continue;
+        }
+        if (V->Type == EJson::String) {
+          FSoftObjectPtr &Dest = *reinterpret_cast<FSoftObjectPtr *>(ElemPtr);
+          Dest = FSoftObjectPath(V->AsString());
+          continue;
+        }
+        OutError = TEXT("SoftObject array inner: expected string asset path or null");
+        return false;
+      }
 
       // Unsupported inner type -> fail explicitly
       OutError =
